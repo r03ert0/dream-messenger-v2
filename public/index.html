@@ -1,0 +1,57 @@
+<html>
+
+<pre>
+</pre>
+
+<style>
+    span {
+        color: blue;
+        font-weight: bold;
+    }
+</style>
+<script src='https://code.jquery.com/jquery-3.1.1.min.js'></script>
+<script>
+var host = "ws://localhost:8080";
+var ws = new WebSocket(host);
+
+ws.onmessage = function(e) {
+    var msg = JSON.parse(e.data);
+    switch(msg.type) {
+        case "play":
+            play(msg.msg);
+            break;
+        }
+}
+
+function play(run) {
+    var j,maxfav=0;
+    var arr=[];
+
+    for(j=0;j<3;j++) {
+        if(run.tweets[j].favs>maxfav) {
+            maxfav=run.tweets[j].favs;
+        }
+    }
+    for(j=0;j<3;j++) {
+        if(run.tweets[j].favs==maxfav) {
+            arr.push({tweet:run.tweets[j],index:j+1});
+        }
+    };
+    var selected=parseInt(Math.random()*(arr.length));
+    
+    var sel=[
+        run.tweets[0].word+'('+run.tweets[0].favs+')',
+        run.tweets[1].word+'('+run.tweets[1].favs+')',
+        run.tweets[2].word+'('+run.tweets[2].favs+')',
+    ];
+    sel[selected]='<span>'+sel[selected]+'</span>';
+    
+    $('pre').append([
+        run.timestamp,
+        ...sel
+    ].join("\t")+'\n');
+
+    new Audio('words/'+run.tweets[selected].word+'.mp3').play()
+}
+</script>
+</html>

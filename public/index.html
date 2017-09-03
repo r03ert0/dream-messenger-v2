@@ -1,5 +1,21 @@
 <html>
 
+<input type="checkbox"></input> Send messages
+
+<table>
+<thead>
+    <tr>
+        <td>Tweet date</td>
+        <td>Tweet time</td>
+        <td>Play date</td>
+        <td>Play time</td>
+        <td>Alternative 1</td>
+        <td>Alternative 2</td>
+        <td>Alternative 3</td>
+    </tr>
+</thead>
+</table>
+
 <pre>
 </pre>
 
@@ -8,11 +24,26 @@
         color: blue;
         font-weight: bold;
     }
+    input {
+        height: 32px;
+        width: 32px;
+        vertical-align: middle;
+    }
+    table {
+        font-family: monospace;
+    }
+    td {
+        padding: 0px 1rem;
+    }
+    .selected {
+        background: lightBlue;
+    }
 </style>
 <script src='https://code.jquery.com/jquery-3.1.1.min.js'></script>
 <script>
 var host = "ws://localhost:8080";
 var ws = new WebSocket(host);
+var is_tweeting = null;
 
 ws.onmessage = function(e) {
     var msg = JSON.parse(e.data);
@@ -20,38 +51,54 @@ ws.onmessage = function(e) {
         case "play":
             play(msg.msg);
             break;
-        }
+        case "db":
+            update_db(msg.msg);
+            break;
+        case "is_tweeting":
+            is_tweeting = msg.msg;
+            $('input').prop('checked',is_tweeting);
+            break;
+    }
+            
 }
 
+$('input').on('change',function(e) {
+    var do_tweet = $(this).is(":checked");
+    ws.send(JSON.stringify({type:'do_tweet',msg:do_tweet}));
+});
+
+function append_run(run) {
+    var time_tweeted = run.timestamp_tweeted;
+    var time_played = run.timestamp_played;
+    $('table').append([
+        '<tr>',
+        '<td>'+(time_tweeted?(new Date(time_tweeted)).toDateString():'–')+'</td>',
+        '<td>'+(time_tweeted?(new Date(time_tweeted)).toTimeString():'–')+'</td>',
+        '<td>'+(time_played?(new Date(time_played)).toDateString():'–')+'</td>',
+        '<td>'+(time_played?(new Date(time_played)).toTimeString():'–')+'</td>',
+        '<td'+((run.tweets[0].selected)?(' class="selected"'):(''))+'>'+run.tweets[0].word+((run.tweets[0].favs)?(' (♥️'+run.tweets[0].favs+')'):'')+'</td>',
+        '<td'+((run.tweets[1].selected)?(' class="selected"'):(''))+'>'+run.tweets[1].word+((run.tweets[1].favs)?(' (♥️'+run.tweets[1].favs+')'):'')+'</td>',
+        '<td'+((run.tweets[2].selected)?(' class="selected"'):(''))+'>'+run.tweets[2].word+((run.tweets[2].favs)?(' (♥️'+run.tweets[2].favs+')'):'')+'</td>',
+        '</tr>'].join(''));
+}
+function update_db(db) {
+    var f;
+    for(f in db) {
+        append_run(db[f]);
+    }
+}
 function play(run) {
-    var j,maxfav=0;
-    var arr=[];
+    var j,selected;
 
     for(j=0;j<3;j++) {
-        if(run.tweets[j].favs>maxfav) {
-            maxfav=run.tweets[j].favs;
+        if(run.tweets[j].selected) {
+            selected = j;
         }
     }
-    for(j=0;j<3;j++) {
-        if(run.tweets[j].favs==maxfav) {
-            arr.push({tweet:run.tweets[j],index:j+1});
-        }
-    };
-    var selected=parseInt(Math.random()*(arr.length));
     
-    var sel=[
-        run.tweets[0].word+'('+run.tweets[0].favs+')',
-        run.tweets[1].word+'('+run.tweets[1].favs+')',
-        run.tweets[2].word+'('+run.tweets[2].favs+')',
-    ];
-    sel[selected]='<span>'+sel[selected]+'</span>';
-    
-    $('pre').append([
-        run.timestamp,
-        ...sel
-    ].join("\t")+'\n');
+    append_run(run);
 
-    new Audio('words/'+run.tweets[selected].word+'.mp3').play()
+    new Audio('words/'+run.tweets[selected].word+'.mp3').play();
 }
 </script>
 </html>

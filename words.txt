@@ -11,7 +11,7 @@ open-eyes
 shut-eyes
 sleepers
 confused
-lost 
+lost
 myself
 contradictory
 pausing

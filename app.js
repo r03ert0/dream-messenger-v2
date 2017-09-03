@@ -59,6 +59,8 @@ var T = new Twit(keys);
 var list=fs.readFileSync("words.txt").toString().split('\n');
 var run=null;
 var p=[];
+var is_tweeting = false;
+var delay = 1000*60*60;
 
 /*
     Schedule:
@@ -69,12 +71,17 @@ var p=[];
 */
 
 function initSocketConnection() {
+    console.log('>> initSocketConnection');
 	// WS connection
 	try {
 		websocket = new WebSocketServer({server:server});
 
 		websocket.on("connection",function connection_fromInitSocketConnection(s) {
             console.log("Connection open");
+            
+            send_db(s);
+            s.send(JSON.stringify({type:'is_tweeting',msg:is_tweeting}));
+			
 			s.on('message',function message_fromInitSocketConnection(msg) {
                 var data=JSON.parse(msg);
 				switch(data.type) {
@@ -82,15 +89,7 @@ function initSocketConnection() {
 						console.log("ECHO: '"+data.msg);
 						break;
 					case "tweet":
-					    post3words().then(function(run) {
-                            console.log("tweeted words:");
-                            console.log(run);
-                            
-                            // collect favs for 1h, then play
-                            setTimeout(function() {
-                                get_favs().then(play);
-                            }, 1000*60*5);
-                        });
+					    tweet();
 					    break;
 					case "get_favs":
 					    get_favs().then(function(favs) {
@@ -102,6 +101,17 @@ function initSocketConnection() {
 					    get_favs().then(function() {
 					        play();
 					    });
+					    break;
+					case "is_tweeting":
+					    s.send(JSON.stringify({type:'is_tweeting',msg:is_tweeting}));
+					    break;
+					case "do_tweet":
+					    is_tweeting = data.msg;
+					    if(is_tweeting) {
+					        console.log("DO TWEET");
+					    } else {
+					        console.log("DO NOT TWEET");
+					    }
 					    break;
 				}
 			});
@@ -117,9 +127,48 @@ function initSocketConnection() {
 	}
 }
 
+function send_db(s) {
+    console.log('>> send_db');
+    var arr = fs.readdirSync('.');
+    var arr2=[];
+    for(var f in arr) {
+        if(arr[f].slice(0,6)=="latest") {
+            var lat = JSON.parse(fs.readFileSync(arr[f]).toString());
+            arr2.push(lat);
+        }
+    }
+    s.send(JSON.stringify({type:'db',msg:arr2}));
+}
+
+function tweet() {
+    post3words().then(function(run) {
+        console.log("tweeted words:");
+        console.log(run);
+        console.log("The selected word will be played at",new Date((new Date()).getTime()+(new Date(delay)).getTime()));
+
+        // collect favs for 2h, then play
+    
+        setTimeout(function() {
+            get_favs(run)
+                .then(function(run2) {
+                    play(run2);
+                    if(is_tweeting) {
+                        tweet();
+                    }
+                });
+        }, delay);
+    });
+}
 function post3words() {
+    console.log('>> post3words');
     var pr=new Promise(function(res,rej) {
-       
+
+        if(!is_tweeting) {
+            console.log("WARNING: was asked to tweet, but tweeting is turned OFF.");
+            rej();
+            return;
+        }
+
         // Pick 3 words
         var words=[];
         for(var j=0;j<3;j++) {
@@ -144,7 +193,7 @@ function post3words() {
                 
                     var mediaIdStr = data.media_id_string;
                     var params = {
-                        status: 'Like this tweet to send @nata_dreams the word "'+word+'"\nMore information at http://dreamsessions.org',
+                        status: 'Like this tweet to send @nata_dreams the word "'+word+'"\n#101nights\nMore info at http://dreamsessions.org',
                         media_ids: [mediaIdStr]
                     };
                     T.post('statuses/update', params, function (err, data, response) {
@@ -159,21 +208,13 @@ function post3words() {
             })(j);
         }
         
-        // Play the selected old word
-        play();
-        
         // Save the new words
         Promise.all(p)
             .then(function(values) { 
                 run = {
-                    timestamp:new Date(),
+                    timestamp_tweeted:new Date(),
                     tweets:values
                 };
-                
-                if(fs.existsSync("latest.json")) {
-                    fs.renameSync("latest.json","latest_"+(new Date()).toString()+".json");
-                    console.log('previous tweets renamed with play date');
-                }
                 
                 fs.writeFileSync("latest.json",JSON.stringify(run));
                 res(run);
@@ -191,14 +232,14 @@ function post3words() {
     return pr;
 }
 
-function get_favs() {
+function get_favs(run) {
+    console.log('>> get_favs');
     var pr = new Promise(function(res,rej) {
-        var latest = JSON.parse(fs.readFileSync("latest.json").toString());
         var p=[];
         for(var j=0;j<3;j++) {
             (function(jj) {
                 p[jj] = new Promise(function(resolve,reject) {
-                    T.get('statuses/show/:id', { id: latest.tweets[jj].id_str }, function (err, data, response) {
+                    T.get('statuses/show/:id', { id: run.tweets[jj].id_str }, function (err, data, response) {
                         resolve(data.favorite_count);
                     });
                 });
@@ -207,23 +248,54 @@ function get_favs() {
 
         Promise.all(p)
             .then(function(values) {
-                latest.tweets[0].favs=values[0];
-                latest.tweets[1].favs=values[1];
-                latest.tweets[2].favs=values[2];
-                fs.writeFileSync("latest.json",JSON.stringify(latest));
-                res(latest);
+                run.tweets[0].favs=values[0];
+                run.tweets[1].favs=values[1];
+                run.tweets[2].favs=values[2];
+                fs.writeFileSync("latest.json",JSON.stringify(run));
+                res(run);
             });
     });
     return pr;
 }
 
-function play() {
-    var latest = JSON.parse(fs.readFileSync("latest.json").toString());
+function play(run) {
+    console.log('>> play');
+    if(!run) {
+        if(fs.existsSync("latest.json")) {
+            run = JSON.parse(fs.readFileSync("latest.json").toString());
+        } else {
+            return;
+        }
+    }
+    
+    // select word to play
+    var j,maxfav=0;
+    var arr=[];
+    for(j=0;j<3;j++) {
+        if(run.tweets[j].favs>maxfav) {
+            maxfav=run.tweets[j].favs;
+        }
+    }
+    for(j=0;j<3;j++) {
+        if(run.tweets[j].favs==maxfav) {
+            arr.push({tweet: run.tweets[j], index: j});
+        }
+    };
+    var selected=arr[parseInt(Math.random()*(arr.length))].index;
+    run.tweets[selected].selected=true;
+    
+    // set play timestamp
+    var played_date = new Date();
+    run.timestamp_played=played_date;
+    
+    // send play message to client
     var msg = {
         type: 'play',
-        msg: latest
+        msg: run
     };
     var n=0;
+    fs.writeFileSync("latest_"+played_date.toString()+".json",JSON.stringify(run));
+    console.log('previous tweets renamed with play date');
 
     websocket.clients.forEach(function each(client) {
         client.send(JSON.stringify(msg));
